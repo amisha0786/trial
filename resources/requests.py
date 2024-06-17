@@ -106,9 +106,16 @@ from flask.views import MethodView
 from flask_smorest import Blueprint, abort
 
 from db import db
+
 from sqlalchemy.exc import SQLAlchemyError
 from models.request_table import RequestModel
 from models.status_table import StatusModel
+
+
+import logging
+from flask import current_app
+
+logger = logging.getLogger(__name__)
 
 blp = Blueprint("Requests", __name__, description="Operations on request_table")
 
@@ -137,11 +144,12 @@ class RequestValues(MethodView):
         db.session.delete(request_item)
         
         status = StatusModel.query.get(request_id)
-        if status:
-            status.status_code = "deleted"
-        else:
-            status = StatusModel(request_id=request_id, status_code="deleted")
-            db.session.add(status)
+        # if status:
+        db.session.delete(status)
+        # else:
+        #     status = StatusModel(request_id=request_id, status_code="deleted")
+        #     db.session.add(status)
+        #     db.session.delete(status)
         
         db.session.commit()
         return {"message": "Request deleted successfully."}, 200
@@ -168,7 +176,7 @@ class RequestValues(MethodView):
             return request_item.as_dict()
         else:
             # Create a new request with the given ID
-            request_generated = RequestModel(id=request_id, **request_data)
+            request_generated = RequestModel(request_id=request_id, **request_data)
             db.session.add(request_generated)
             status_generated = StatusModel(request_id=request_id, status_code="created")
             db.session.add(status_generated)
@@ -182,9 +190,9 @@ class RequestAslList(MethodView):
         if not requests:
             abort(404, message="Request not found.")
         for request_item in requests:
-            status = StatusModel.query.get(request_item.id)
+            status = StatusModel.query.get(request_item.request_id)
             if not status:
-                status = StatusModel(request_id=request_item.id, status_code="retrieved")
+                status = StatusModel(request_id=request_item.request_id, status_code="retrieved")
                 db.session.add(status)
             else:
                 status.status_code = "retrieved"
@@ -198,9 +206,9 @@ class RequestUserRequestList(MethodView):
         if not requests:
             abort(404, message="Request not found.")
         for request_item in requests:
-            status = StatusModel.query.get(request_item.id)
+            status = StatusModel.query.get(request_item.request_id)
             if not status:
-                status = StatusModel(request_id=request_item.id, status_code="retrieved")
+                status = StatusModel(request_id=request_item.request_id, status_code="retrieved")
                 db.session.add(status)
             else:
                 status.status_code = "retrieved"
@@ -213,20 +221,57 @@ class GetAllRequests(MethodView):
         requests = RequestModel.query.all()
         return [request.as_dict() for request in requests]
 
+# @blp.route("/create")
+# class CreateRequest(MethodView):
+#     def post(self):
+#         request_values = request.get_json()
+#         request_id = uuid.uuid4().hex
+#         request_data = RequestModel(request_id=request_id, **request_values)
+#         status_data = StatusModel(request_id=request_id, status_code="created")
+        
+#         try:
+#             db.session.add(request_data)
+#             db.session.add(status_data)
+#             db.session.commit()
+#         except SQLAlchemyError:
+#             db.session.rollback()
+#             abort(500, message="An error occurred while inserting the item.")
+        
+#         return request_data.as_dict(), 201
+
 @blp.route("/create")
 class CreateRequest(MethodView):
     def post(self):
-        request_values = request.get_json()
-        request_id = uuid.uuid4().hex
-        request_data = RequestModel(id=request_id, **request_values)
-        status_data = StatusModel(request_id=request_id, status_code="created")
+        request_values = request.json
+       
+        # Validate required fields
+        required_fields = ["user_name", "user_id", "asl_name", "scaling_type", "start_date", "end_date", "max_size", "min_size", "emr_version"]
+        if not all(field in request_values for field in required_fields):
+            abort(400, message="Bad request. Ensure all required fields are included in the JSON payload.")
         
+        request_id = uuid.uuid4().hex
+        request_data = RequestModel(request_id=request_id,
+                                    user_name = request_values["user_name"] ,
+                                    user_id = request_values["user_id"] ,
+                                    asl_name = request_values["asl_name"],
+                                    scaling_type = request_values["scaling_type"] ,
+                                    start_date = request_values["start_date"] ,
+                                    end_date = request_values["end_date"] ,
+                                    max_size = request_values["max_size"] ,
+                                    min_size = request_values["min_size"] ,
+                                    emr_version = request_values["emr_version"],
+                                    approval_status = request_values["approval_status"],
+                                    )
+        status_data = StatusModel(request_id=request_id, status_code="created")
+
         try:
             db.session.add(request_data)
             db.session.add(status_data)
             db.session.commit()
-        except SQLAlchemyError:
+            logger.info(msg="some logging info")
+        except Exception as e:
+            
             db.session.rollback()
             abort(500, message="An error occurred while inserting the item.")
-        
+
         return request_data.as_dict(), 201
